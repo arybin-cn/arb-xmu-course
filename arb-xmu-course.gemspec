@@ -11,7 +11,7 @@ Gem::Specification.new do |spec|
 
   spec.summary       = %q{XMU Course}
   spec.description   = %q{XMU Course}
-  spec.homepage      = "https://github.com/arybin-cn/arb-xmu-course"
+  spec.homepage      = 'https://github.com/arybin-cn/arb-xmu-course'
 
   spec.files         = `git ls-files -z`.split("\x0").reject { |f| f.match(%r{^(test|spec|features)/}) }
   spec.bindir        = "exe"
