@@ -1,7 +1,9 @@
 #!/usr/bin/env ruby
 require 'slop'
+require 'json'
 require 'httpclient'
 require 'nokogiri'
+require 'terminal-table'
 require 'arb/xmu/course'
 
 include Arb::Util
@@ -9,6 +11,7 @@ include Arb::Xmu::Course
 
 TOKEN_FILE_NAME = 'encrypted_token'
 TOKEN_SEPARATOR = ':'
+
 
 def filter_text(raw)
   if Enumerable===raw
@@ -26,9 +29,9 @@ def filter_text(raw)
 end
 
 def set_up_account
-  $stdout.puts 'Please input your student id:'
+  $stdout.puts '请输入学号：'
   stu_id= $stdin.gets.chomp
-  $stdout.puts 'Please input your password:'
+  $stdout.puts '请输入密码：'
   passwd= $stdin.gets.chomp
   File.open TOKEN_FILE_NAME, 'w' do |file|
     file.write (SimpleDes.encrypt(stu_id)+TOKEN_SEPARATOR+SimpleDes.encrypt(passwd))
@@ -39,7 +42,7 @@ def retrieve_check_code(client)
   File.open 'check_code.jpeg', 'wb' do |file|
     file.write(client.get('http://bkxk.xmu.edu.cn/xsxk/getCheckCode').body)
   end
-  $stdout.puts 'Please input the check code generated as "check_code.jpeg" in current directory:'
+  $stdout.puts '验证码图片已在当前目录生成，请查看后输入：'
   $stdin.gets.chomp
 end
 
@@ -51,29 +54,109 @@ def authorize_session(client, username, password)
   client.get 'http://bkxk.xmu.edu.cn/xsxk/index.html'
 end
 
+#获取选课轮次
+def get_select_round(client, id)
+  round_id=nil
+  client.get('http://bkxk.xmu.edu.cn/xsxk/index.html').body.scan /addXklcList\((.*?)\)/m do |match|
+    tmpArr = filter_text(match[0].split(','))
+    if tmpArr[2]==id.to_s
+      round_id=tmpArr[1]
+      break
+    end
+  end
+  round_id
+end
+
+#获取主修选课轮次
+def get_main_select_round(client)
+  get_select_round(client, 1)
+end
+
+def show_courses_in_table(courses)
+  table = Terminal::Table.new do |table|
+    table.add_row %w{ID 课程名称 学分 班号 主讲老师 总学时}
+    courses.each do |course_entity|
+      table.add_separator
+      table.add_row course_entity.to_a
+    end
+  end
+  $stdout.puts table
+end
+
 def parse_courses(raw_html)
 
   course_entities = []
-  #puts raw_html
-  raw_html.scan /yxxxJxb\[jxbid\] = top\.createJxbObj\((.*?)\)/m do |match|
+  count=0
+  raw_html.scan /top\.createJxbObj\((.*?)\)/m do |match|
     tmpArr = filter_text(match[0].split(','))
     course_entities << CourseEntity.new do |entity|
-      
+      entity.index= (count=count+1)
+      entity.id= tmpArr[1]
+      entity.name= tmpArr[4]
+      entity.credit= tmpArr[10]
+      entity.teacher= tmpArr[14]
+      entity.period= tmpArr[8]
+      entity.class_name= tmpArr[5]
     end
   end
-
   course_entities
 end
 
-def parse_school_courses (raw_html)
-  parse_courses(raw_html)
 
+def request_select_course(client, course_entity, xxlx, lcid)
+  msg = client.get 'http://bkxk.xmu.edu.cn/xsxk/elect.html',
+                   method: 'handleZxxk',
+                   jxbid: course_entity.id,
+                   xxlx: xxlx,
+                   xklc: lcid
+  JSON::parse msg.body
 end
+
+def create_attempt_thread(max_interval, client, course_entity, xxlx, lcid)
+  thr = Thread.new do
+    count=0
+    loop do
+      puts 'fun'
+      count+=1
+      interval = 1+rand(max_interval)
+      sleep interval
+      res = request_select_course(client, course_entity, xxlx, lcid)
+      if res[:success]
+        $stdout.puts "课程：《#{course_entity.name}》已经成功选课！"
+        break
+      else
+        $stdout.puts "课程：《#{course_entity.name}》第#{count}次尝试选课失败，#{interval}秒后将重试。"
+      end
+    end
+
+  end
+  thr.join
+end
+
 
 def select_school_elective(client, username, password)
   authorize_session(client, username, password)
-  client.get 'http://bkxk.xmu.edu.cn/xsxk/compareTimestone.html?type=zxxk&timestone='
-  school_courses = parse_school_courses((client.get 'http://bkxk.xmu.edu.cn/xsxk/yxxx.html').body)
+  lcid=get_main_select_round(client)
+
+  school_courses = parse_courses((client.get 'http://bkxk.xmu.edu.cn/xsxk/yxxx.html').body)
+  show_courses_in_table school_courses
+
+  $stdout.puts
+  $stdout.puts '输入要选的课程ID， 以空格分割：'
+
+  ids = $stdin.gets.chomp.split(' ')
+
+  $stdout.puts '输入最大重试间隔时间，默认3秒，要求不得低于2秒：'
+
+  max_interval = $stdin.gets.chomp.to_i
+  max_interval = 2 if max_interval<2
+
+
+  ids.each do |id|
+    create_attempt_thread(max_interval, client, school_courses.find { |course| course.index==id }, 1, lcid)
+  end
+
+
 end
 
 def select_general_elective
@@ -86,8 +169,7 @@ end
 
 
 unless (File.exists? TOKEN_FILE_NAME)
-  puts 'Please set up your account information first.'
-  puts 'Note: Account data will be encrypted and stored in current directory!'
+  puts '请先设置账户信息（账户信息会先加密然后保存在本地，用于授权选课系统）'
   set_up_account
   exit
 end
@@ -100,16 +182,16 @@ File.open TOKEN_FILE_NAME, 'r' do |file|
 end
 
 opts = Slop.parse do |o|
-  o.bool *%w{-h --help}, 'show help'
-  o.bool *%w{-c --clear}, 'clear encrypted token'
-  o.bool *%w{-r --reset}, 'reset up account information'
+  o.bool *%w{-h --help}, '显示帮助'
+  o.bool *%w{-c --clear}, '清除本地账户信息'
+  o.bool *%w{-r --reset}, '重置账户信息'
 
-  #院选课程
-  o.bool *%w{-s --school}, 'select school\'s elective courses.'
-  #校选课程
-  o.bool *%w{-g --general}, 'select general\'s elective courses.'
-  #公共课程
-  o.bool *%w{-p --public}, 'select public courses.'
+  #院选课程 xxlx=4
+  o.bool *%w{-s --school}, '院选选课'
+  #校选课程 xxlx=3
+  o.bool *%w{-g --general}, '校选选课'
+  #公共课程 xxlx=5
+  o.bool *%w{-p --public}, '公共课选课'
 end
 
 case true

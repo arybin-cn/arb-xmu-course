@@ -12,6 +12,10 @@ module Arb
         attr_accessor :credit
         #教师名
         attr_accessor :teacher
+        #班级
+        attr_accessor :class_name
+        #总学时
+        attr_accessor :period
 
         #Entity.new(index: 1,credit: 3, ...)
         def initialize(**hash_args)
@@ -19,6 +23,11 @@ module Arb
           hash_args.keys.each do |key|
             send "#{key}=", hash_args[key]
           end
+        end
+
+        #for row output
+        def to_a
+          [index, name, credit, class_name, teacher, period]
         end
       end
     end
