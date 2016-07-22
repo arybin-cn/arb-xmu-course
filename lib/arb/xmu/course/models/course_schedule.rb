@@ -1,7 +1,7 @@
 module Arb
   module Xmu
     module Course
-      class CourseInfo
+      class CourseSchedule
       end
     end
   end

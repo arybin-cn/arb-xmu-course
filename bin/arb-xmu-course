@@ -1,20 +1,17 @@
 #!/usr/bin/env ruby
 require 'slop'
-require 'arb/util/simple_des'
+require 'arb/xmu/course'
 
 include Arb::Util
+include Arb::Xmu::Course
 
 TOKEN_FILE_NAME = 'encrypted_token'
 TOKEN_SEPARATOR = ':'
 
-def p(str)
-  puts '>'*3+'  '+str+'  '+'<'*3
-end
-
 def set_up_account
-  p 'Please input your student id:'
+  puts 'Please input your student id:'
   stu_id=gets.chomp
-  p 'Please input your password:'
+  puts 'Please input your password:'
   passwd=gets.chomp
   File.open TOKEN_FILE_NAME, 'w' do |file|
     file.write (SimpleDes.encrypt(stu_id)+TOKEN_SEPARATOR+SimpleDes.encrypt(passwd))
@@ -35,8 +32,8 @@ end
 
 
 unless (File.exists? TOKEN_FILE_NAME)
-  p 'Please set up your account information first.'
-  p 'Note: Data will be encrypted and stored in current directory!'
+  puts 'Please set up your account information first.'
+  puts 'Note: Data will be encrypted and stored in current directory!'
   set_up_account
   exit
 end
@@ -66,7 +63,7 @@ case true
     File.delete(TOKEN_FILE_NAME) && exit
   when opts.reset?
     set_up_account && exit
-  when opt.school?
+  when opts.school?
     select_school_elective
   when opts.general?
     select_general_elective
@@ -84,9 +81,9 @@ end
 # end
 #
 # puts 'enter your student id'
-# user= '21620142202632' || gets.chomp
+# user= gets.chomp
 # puts 'enter your password'
-# passwd='5972491679'|| gets.chomp
+# passwd=gets.chomp
 # puts 'enter the checkcode'
 # checkcode=gets.chomp
 #
