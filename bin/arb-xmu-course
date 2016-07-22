@@ -1,2 +1,62 @@
 #!/usr/bin/env ruby
 
+require 'arb/xmu/course'
+require 'slop'
+require 'httpclient'
+require 'nokogiri'
+
+def p(str)
+  puts '>'*10+'  '+str+'  '+'<'*10
+end
+
+token_file_name = 'encrypted_token'
+token_seperator = ':'
+
+unless (File.exists? token_file_name)
+  puts 'Please input your student id.'
+  stuid=gets.chomp
+  puts 'Please input your password\nNote: The password will be encrypted and then stored in current directory.'
+  passwd=gets.chomp
+  File.open token_file_name, 'w' do |file|
+    file.write (Des.encode(stuid)+token_seperator+Des.encode(passwd))
+  end
+else
+  stuid, passwd=nil
+  File.open token_file_name, 'r' do |file|
+    stuid, passwd=Des.decode(file.read.split(token_seperator))
+  end
+
+  opts = Slop.parse do |o|
+    o.bool *%w{-h --help}, 'show help'
+    o.bool *%w{-c --clear}, 'clear encrypted token'
+  end
+
+  puts opts if opts.help?
+
+  puts stuid,passwd
+
+  # client = HTTPClient.new
+
+  # #session init
+  # client.get 'http://bkxk.xmu.edu.cn/xsxk/login.html'
+  #
+  # File.open 'checkcode.jpeg','wb' do |file|
+  #   file.write(client.get('http://bkxk.xmu.edu.cn/xsxk/getCheckCode').body)
+  # end
+  #
+  # puts 'enter your student id'
+  # user= '21620142202632' || gets.chomp
+  # puts 'enter your password'
+  # passwd='5972491679'|| gets.chomp
+  # puts 'enter the checkcode'
+  # checkcode=gets.chomp
+  #
+  # client.get 'http://bkxk.xmu.edu.cn/xsxk/login.html',username: user,password: passwd,checkCode: checkcode
+  #
+  # puts (client.get 'http://bkxk.xmu.edu.cn/xsxk/localInfo.html').body
+  #
+  # Nokogiri::parse((client.get 'http://bkxk.xmu.edu.cn/xsxk/index.html').body).css('script').each do |x|
+  #   puts x.text
+  # end
+  #
+end
