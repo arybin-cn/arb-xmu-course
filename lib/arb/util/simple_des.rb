@@ -5,7 +5,7 @@ module Arb
   module Util
     class SimpleDes
       ALG = 'DES-EDE3-CBC'
-      KEY = (Dir.pwd+'bYaRyBin')[0..7]
+      KEY = (Dir.pwd.split('').select { |char| char=~/\w/ }.join+'bYaRyBin')[0..7]
       DES_KEY = KEY.swapcase
       class << self
         %i{encrypt decrypt}.each do |type|
@@ -13,15 +13,15 @@ module Arb
             if Array===input
               return [].tap do |arr|
                 input.each do |item|
-                  arr<<method(type)[item]
+                  arr<<(send type, item)
                 end
               end
             end
             des = OpenSSL::Cipher::Cipher.new(ALG)
             des.pkcs5_keyivgen(KEY, DES_KEY)
-            des.method(type)[]
+            des.send type
             input=Base64.decode64(input) if :decrypt==type
-            res = des.update(input)<<des.final
+            res =(des.update(input)<<des.final)
             return Base64.encode64(res).chomp if :encrypt==type
             res
           end

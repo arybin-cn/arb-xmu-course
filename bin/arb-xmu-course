@@ -1,62 +1,100 @@
 #!/usr/bin/env ruby
-
-require 'arb/xmu/course'
 require 'slop'
-require 'httpclient'
-require 'nokogiri'
+require 'arb/util/simple_des'
+
+include Arb::Util
+
+TOKEN_FILE_NAME = 'encrypted_token'
+TOKEN_SEPARATOR = ':'
 
 def p(str)
-  puts '>'*10+'  '+str+'  '+'<'*10
+  puts '>'*3+'  '+str+'  '+'<'*3
 end
 
-token_file_name = 'encrypted_token'
-token_seperator = ':'
-
-unless (File.exists? token_file_name)
-  puts 'Please input your student id.'
-  stuid=gets.chomp
-  puts 'Please input your password\nNote: The password will be encrypted and then stored in current directory.'
+def set_up_account
+  p 'Please input your student id:'
+  stu_id=gets.chomp
+  p 'Please input your password:'
   passwd=gets.chomp
-  File.open token_file_name, 'w' do |file|
-    file.write (Des.encode(stuid)+token_seperator+Des.encode(passwd))
+  File.open TOKEN_FILE_NAME, 'w' do |file|
+    file.write (SimpleDes.encrypt(stu_id)+TOKEN_SEPARATOR+SimpleDes.encrypt(passwd))
   end
-else
-  stuid, passwd=nil
-  File.open token_file_name, 'r' do |file|
-    stuid, passwd=Des.decode(file.read.split(token_seperator))
-  end
-
-  opts = Slop.parse do |o|
-    o.bool *%w{-h --help}, 'show help'
-    o.bool *%w{-c --clear}, 'clear encrypted token'
-  end
-
-  puts opts if opts.help?
-
-  puts stuid,passwd
-
-  # client = HTTPClient.new
-
-  # #session init
-  # client.get 'http://bkxk.xmu.edu.cn/xsxk/login.html'
-  #
-  # File.open 'checkcode.jpeg','wb' do |file|
-  #   file.write(client.get('http://bkxk.xmu.edu.cn/xsxk/getCheckCode').body)
-  # end
-  #
-  # puts 'enter your student id'
-  # user= '21620142202632' || gets.chomp
-  # puts 'enter your password'
-  # passwd='5972491679'|| gets.chomp
-  # puts 'enter the checkcode'
-  # checkcode=gets.chomp
-  #
-  # client.get 'http://bkxk.xmu.edu.cn/xsxk/login.html',username: user,password: passwd,checkCode: checkcode
-  #
-  # puts (client.get 'http://bkxk.xmu.edu.cn/xsxk/localInfo.html').body
-  #
-  # Nokogiri::parse((client.get 'http://bkxk.xmu.edu.cn/xsxk/index.html').body).css('script').each do |x|
-  #   puts x.text
-  # end
-  #
 end
+
+def select_school_elective
+
+end
+
+def select_general_elective
+
+end
+
+def select_public
+
+end
+
+
+unless (File.exists? TOKEN_FILE_NAME)
+  p 'Please set up your account information first.'
+  p 'Note: Data will be encrypted and stored in current directory!'
+  set_up_account
+  exit
+end
+
+stu_id, passwd=nil
+File.open TOKEN_FILE_NAME, 'r' do |file|
+  stu_id, passwd=SimpleDes.decrypt(file.read.split(TOKEN_SEPARATOR))
+end
+
+opts = Slop.parse do |o|
+  o.bool *%w{-h --help}, 'show help'
+  o.bool *%w{-c --clear}, 'clear encrypted token'
+  o.bool *%w{-r --reset}, 'reset up account information'
+
+  #院选课程
+  o.bool *%w{-s --school}, 'select school\'s elective courses.'
+  #校选课程
+  o.bool *%w{-g --general}, 'select general\'s elective courses.'
+  #公共课程
+  o.bool *%w{-p --public}, 'select public courses.'
+end
+
+case true
+  when opts.help?
+    puts(opts) && exit
+  when opts.clear?
+    File.delete(TOKEN_FILE_NAME) && exit
+  when opts.reset?
+    set_up_account && exit
+  when opt.school?
+    select_school_elective
+  when opts.general?
+    select_general_elective
+  when opts.public?
+    select_public
+end
+
+# client = HTTPClient.new
+
+# #session init
+# client.get 'http://bkxk.xmu.edu.cn/xsxk/login.html'
+#
+# File.open 'checkcode.jpeg','wb' do |file|
+#   file.write(client.get('http://bkxk.xmu.edu.cn/xsxk/getCheckCode').body)
+# end
+#
+# puts 'enter your student id'
+# user= '21620142202632' || gets.chomp
+# puts 'enter your password'
+# passwd='5972491679'|| gets.chomp
+# puts 'enter the checkcode'
+# checkcode=gets.chomp
+#
+# client.get 'http://bkxk.xmu.edu.cn/xsxk/login.html',username: user,password: passwd,checkCode: checkcode
+#
+# puts (client.get 'http://bkxk.xmu.edu.cn/xsxk/localInfo.html').body
+#
+# Nokogiri::parse((client.get 'http://bkxk.xmu.edu.cn/xsxk/index.html').body).css('script').each do |x|
+#   puts x.text
+# end
+#
