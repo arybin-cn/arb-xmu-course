@@ -15,6 +15,7 @@ module Arb
 
         #Entity.new(index: 1,credit: 3, ...)
         def initialize(**hash_args)
+          yield self if block_given?
           hash_args.keys.each do |key|
             send "#{key}=", hash_args[key]
           end

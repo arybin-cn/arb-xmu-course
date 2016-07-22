@@ -1,5 +1,7 @@
 #!/usr/bin/env ruby
 require 'slop'
+require 'httpclient'
+require 'nokogiri'
 require 'arb/xmu/course'
 
 include Arb::Util
@@ -8,18 +10,70 @@ include Arb::Xmu::Course
 TOKEN_FILE_NAME = 'encrypted_token'
 TOKEN_SEPARATOR = ':'
 
+def filter_text(raw)
+  if Enumerable===raw
+    return [].tap do |arr|
+      raw.each do |item|
+        arr<<filter_text(item)
+      end
+    end
+  end
+  black_list =([] << "\r" << "\n" << "\t" << "'")
+  black_list.each do |tmp|
+    raw.gsub! tmp, ''
+  end
+  raw
+end
+
 def set_up_account
-  puts 'Please input your student id:'
-  stu_id=gets.chomp
-  puts 'Please input your password:'
-  passwd=gets.chomp
+  $stdout.puts 'Please input your student id:'
+  stu_id= $stdin.gets.chomp
+  $stdout.puts 'Please input your password:'
+  passwd= $stdin.gets.chomp
   File.open TOKEN_FILE_NAME, 'w' do |file|
     file.write (SimpleDes.encrypt(stu_id)+TOKEN_SEPARATOR+SimpleDes.encrypt(passwd))
   end
 end
 
-def select_school_elective
+def retrieve_check_code(client)
+  File.open 'check_code.jpeg', 'wb' do |file|
+    file.write(client.get('http://bkxk.xmu.edu.cn/xsxk/getCheckCode').body)
+  end
+  $stdout.puts 'Please input the check code generated as "check_code.jpeg" in current directory:'
+  $stdin.gets.chomp
+end
 
+def authorize_session(client, username, password)
+  checkCode = retrieve_check_code(client)
+  client.get 'http://bkxk.xmu.edu.cn/xsxk/login.html', username: username, password: password, checkCode: checkCode
+  #握手选课系统
+  client.get 'http://bkxk.xmu.edu.cn/xsxk/localInfo.html'
+  client.get 'http://bkxk.xmu.edu.cn/xsxk/index.html'
+end
+
+def parse_courses(raw_html)
+
+  course_entities = []
+  #puts raw_html
+  raw_html.scan /yxxxJxb\[jxbid\] = top\.createJxbObj\((.*?)\)/m do |match|
+    tmpArr = filter_text(match[0].split(','))
+    course_entities << CourseEntity.new do |entity|
+      
+    end
+  end
+
+  course_entities
+end
+
+def parse_school_courses (raw_html)
+  parse_courses(raw_html)
+
+end
+
+def select_school_elective(client, username, password)
+  authorize_session(client, username, password)
+  client.get 'http://bkxk.xmu.edu.cn/xsxk/compareTimestone.html?type=zxxk&timestone='
+  school_courses = parse_school_courses((client.get 'http://bkxk.xmu.edu.cn/xsxk/yxxx.html').body)
 end
 
 def select_general_elective
@@ -33,12 +87,14 @@ end
 
 unless (File.exists? TOKEN_FILE_NAME)
   puts 'Please set up your account information first.'
-  puts 'Note: Data will be encrypted and stored in current directory!'
+  puts 'Note: Account data will be encrypted and stored in current directory!'
   set_up_account
   exit
 end
 
 stu_id, passwd=nil
+client = HTTPClient.new
+
 File.open TOKEN_FILE_NAME, 'r' do |file|
   stu_id, passwd=SimpleDes.decrypt(file.read.split(TOKEN_SEPARATOR))
 end
@@ -64,11 +120,11 @@ case true
   when opts.reset?
     set_up_account && exit
   when opts.school?
-    select_school_elective
+    select_school_elective(client, stu_id, passwd)
   when opts.general?
-    select_general_elective
+    # select_general_elective
   when opts.public?
-    select_public
+    # select_public
 end
 
 # client = HTTPClient.new

@@ -10,7 +10,7 @@ module Arb
       class << self
         %i{encrypt decrypt}.each do |type|
           define_method type do |input|
-            if Array===input
+            if Enumerable===input
               return [].tap do |arr|
                 input.each do |item|
                   arr<<(send type, item)
