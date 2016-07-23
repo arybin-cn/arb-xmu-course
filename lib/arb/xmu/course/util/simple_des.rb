@@ -5,7 +5,7 @@ module Arb
   module Util
     class SimpleDes
       ALG = 'DES-EDE3-CBC'
-      KEY = (Dir.pwd.split('').select { |char| char=~/\w/ }.join+'bYaRyBin')[0..7]
+      KEY = 'bYaRyBin'
       DES_KEY = KEY.swapcase
       class << self
         %i{encrypt decrypt}.each do |type|

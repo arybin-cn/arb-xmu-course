@@ -1,9 +1,9 @@
 #!/usr/bin/env ruby
 require 'slop'
-require 'json'
 require 'httpclient'
-require 'nokogiri'
 require 'terminal-table'
+
+require 'json'
 require 'arb/xmu/course'
 
 include Arb::Util
@@ -11,6 +11,7 @@ include Arb::Xmu::Course
 
 TOKEN_FILE_NAME = 'encrypted_token'
 TOKEN_SEPARATOR = ':'
+CLIENT = HTTPClient.new
 
 
 def filter_text(raw)
@@ -112,51 +113,66 @@ def request_select_course(client, course_entity, xxlx, lcid)
   JSON::parse msg.body
 end
 
-def create_attempt_thread(max_interval, client, course_entity, xxlx, lcid)
-  thr = Thread.new do
+def create_attempt_thread(max_interval, client, course, xxlx, lcid, &block)
+  Thread.new do
     count=0
     loop do
-      puts 'fun'
       count+=1
-      interval = 1+rand(max_interval)
+      interval= 1+rand(max_interval)
       sleep interval
-      res = request_select_course(client, course_entity, xxlx, lcid)
-      if res[:success]
-        $stdout.puts "课程：《#{course_entity.name}》已经成功选课！"
+      res = request_select_course(client, course, xxlx, lcid)
+      if res['success']
+        $stdout.puts "课程：《#{course.name}》已经成功选课！"
         break
       else
-        $stdout.puts "课程：《#{course_entity.name}》第#{count}次尝试选课失败，#{interval}秒后将重试。"
+        $stdout.puts "课程：《#{course.name}》第#{count}次尝试选课失败，#{interval}秒后将重试。（错误信息：#{res['message']}）"
       end
+      exit if block.binding.local_variable_get(:opened_thread_count)-1==0
     end
-
   end
-  thr.join
 end
 
-
-def select_school_elective(client, username, password)
+def prepare_select_course(client)
+  ensure_account
+  username, password = get_account_info
   authorize_session(client, username, password)
-  lcid=get_main_select_round(client)
+end
 
-  school_courses = parse_courses((client.get 'http://bkxk.xmu.edu.cn/xsxk/yxxx.html').body)
-  show_courses_in_table school_courses
-
-  $stdout.puts
+def try_to_select_courses(client, courses, xxlx, lcid)
+  $stdout.puts ''
   $stdout.puts '输入要选的课程ID， 以空格分割：'
 
   ids = $stdin.gets.chomp.split(' ')
 
-  $stdout.puts '输入最大重试间隔时间，默认3秒，要求不得低于2秒：'
+  $stdout.puts '输入最大重试间隔时间，要求不得低于2秒：'
 
   max_interval = $stdin.gets.chomp.to_i
   max_interval = 2 if max_interval<2
-
-
+  opened_thread_count = ids.size
   ids.each do |id|
-    create_attempt_thread(max_interval, client, school_courses.find { |course| course.index==id }, 1, lcid)
+    create_attempt_thread(max_interval, client, courses.find { |course| course.index==id.to_i }, xxlx, lcid) {}
   end
+end
+
+def get_account_info
+  stu_id, passwd=nil
+  File.open TOKEN_FILE_NAME, 'r' do |file|
+    stu_id, passwd=SimpleDes.decrypt(file.read.split(TOKEN_SEPARATOR))
+  end
+  [stu_id, passwd]
+end
 
 
+def select_school_elective(client)
+
+  prepare_select_course(client)
+  school_courses = parse_courses((client.get 'http://bkxk.xmu.edu.cn/xsxk/yxxx.html').body)
+  show_courses_in_table school_courses
+  try_to_select_courses(client, school_courses, 4, get_main_select_round(client))
+
+  loop do
+    sleep 3
+  end
 end
 
 def select_general_elective
@@ -167,18 +183,12 @@ def select_public
 
 end
 
-
-unless (File.exists? TOKEN_FILE_NAME)
-  puts '请先设置账户信息（账户信息会先加密然后保存在本地，用于授权选课系统）'
-  set_up_account
-  exit
-end
-
-stu_id, passwd=nil
-client = HTTPClient.new
-
-File.open TOKEN_FILE_NAME, 'r' do |file|
-  stu_id, passwd=SimpleDes.decrypt(file.read.split(TOKEN_SEPARATOR))
+def ensure_account
+  unless (File.exists? TOKEN_FILE_NAME)
+    puts '请先设置账户信息（账户信息会先加密然后保存在本地，用于授权选课系统）'
+    set_up_account
+    exit
+  end
 end
 
 opts = Slop.parse do |o|
@@ -187,14 +197,18 @@ opts = Slop.parse do |o|
   o.bool *%w{-r --reset}, '重置账户信息'
 
   #院选课程 xxlx=4
-  o.bool *%w{-s --school}, '院选选课'
+  o.bool *%w{-s --school}, '院选选课模式'
   #校选课程 xxlx=3
-  o.bool *%w{-g --general}, '校选选课'
+  o.bool *%w{-g --general}, '校选选课模式'
   #公共课程 xxlx=5
-  o.bool *%w{-p --public}, '公共课选课'
+  o.bool *%w{-p --public}, '公共课选课模式'
+
+  o.bool *%w{-v --version}, '显示当前版本'
 end
 
 case true
+  when opts.version?
+    puts Arb::Xmu::Course::VERSION
   when opts.help?
     puts(opts) && exit
   when opts.clear?
@@ -202,34 +216,11 @@ case true
   when opts.reset?
     set_up_account && exit
   when opts.school?
-    select_school_elective(client, stu_id, passwd)
+    select_school_elective(CLIENT)
   when opts.general?
     # select_general_elective
   when opts.public?
     # select_public
+  else
+    puts(opts) && exit
 end
-
-# client = HTTPClient.new
-
-# #session init
-# client.get 'http://bkxk.xmu.edu.cn/xsxk/login.html'
-#
-# File.open 'checkcode.jpeg','wb' do |file|
-#   file.write(client.get('http://bkxk.xmu.edu.cn/xsxk/getCheckCode').body)
-# end
-#
-# puts 'enter your student id'
-# user= gets.chomp
-# puts 'enter your password'
-# passwd=gets.chomp
-# puts 'enter the checkcode'
-# checkcode=gets.chomp
-#
-# client.get 'http://bkxk.xmu.edu.cn/xsxk/login.html',username: user,password: passwd,checkCode: checkcode
-#
-# puts (client.get 'http://bkxk.xmu.edu.cn/xsxk/localInfo.html').body
-#
-# Nokogiri::parse((client.get 'http://bkxk.xmu.edu.cn/xsxk/index.html').body).css('script').each do |x|
-#   puts x.text
-# end
-#
