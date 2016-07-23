@@ -13,20 +13,61 @@ TOKEN_FILE_NAME = 'encrypted_token'
 TOKEN_SEPARATOR = ':'
 CLIENT = HTTPClient.new
 
+opts = Slop.parse do |o|
+  o.bool *%w{-h --help}, '显示帮助'
+  o.bool *%w{-c --clear}, '清除本地账户信息'
+  o.bool *%w{-r --reset}, '重置账户信息'
 
-def filter_text(raw)
-  if Enumerable===raw
-    return [].tap do |arr|
-      raw.each do |item|
-        arr<<filter_text(item)
-      end
-    end
+  #院选课程 xxlx=4
+  o.bool *%w{-s --school}, '院选选课模式'
+  #校选课程 xxlx=3
+  o.bool *%w{-g --general}, '校选选课模式'
+  #公共课程 xxlx=5
+  o.bool *%w{-p --public}, '公共课选课模式'
+
+  o.bool *%w{-v --version}, '显示当前版本'
+end
+
+case true
+  when opts.version?
+    puts Arb::Xmu::Course::VERSION
+  when opts.help?
+    puts(opts) && exit
+  when opts.clear?
+    File.delete(TOKEN_FILE_NAME) && exit
+  when opts.reset?
+    set_up_account
+  when opts.school?
+    select_school_elective(CLIENT)
+  when opts.general?
+    select_general_elective(CLIENT)
+  when opts.public?
+    select_public(CLIENT)
+  else
+    puts(opts) && exit
+end
+
+def select_school_elective(client)
+  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/yxxx.html?pagination=5000', 4
+end
+
+def select_general_elective(client)
+  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/qxxxx.html?pagination=5000', 3
+end
+
+def select_public(client)
+  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/ggk.html?pagination=5000', 5
+end
+
+def select_course_common(client, url, xxlx)
+  prepare_select_course(client)
+  courses = parse_courses((client.get url).body)
+  show_courses_in_table courses
+  try_to_select_courses(client, courses, xxlx, get_main_select_round(client))
+  $stdout.puts '已经开始选课，输入字符q退出。'
+  loop do
+    exit if 'q'==$stdin.gets.chomp
   end
-  black_list =([] << "\r" << "\n" << "\t" << "'" << '<br>')
-  black_list.each do |tmp|
-    raw.gsub! tmp, ''
-  end
-  raw
 end
 
 def set_up_account
@@ -37,6 +78,8 @@ def set_up_account
   File.open TOKEN_FILE_NAME, 'w' do |file|
     file.write (SimpleDes.encrypt(stu_id)+TOKEN_SEPARATOR+SimpleDes.encrypt(passwd))
   end
+  $stdout.puts '账号信息已经加密并保存在当前目录，请妥善保管。'
+  exit
 end
 
 def retrieve_check_code(client)
@@ -48,8 +91,7 @@ def retrieve_check_code(client)
 end
 
 def authorize_session(client, username, password)
-  checkCode = retrieve_check_code(client)
-  client.get 'http://bkxk.xmu.edu.cn/xsxk/login.html', username: username, password: password, checkCode: checkCode
+  client.get 'http://bkxk.xmu.edu.cn/xsxk/login.html', username: username, password: password, checkCode: retrieve_check_code(client)
   #握手选课系统
   client.get 'http://bkxk.xmu.edu.cn/xsxk/localInfo.html'
   client.get 'http://bkxk.xmu.edu.cn/xsxk/index.html'
@@ -59,9 +101,9 @@ end
 def get_select_round(client, id)
   round_id=nil
   client.get('http://bkxk.xmu.edu.cn/xsxk/index.html').body.scan /addXklcList\((.*?)\)/m do |match|
-    tmpArr = filter_text(match[0].split(','))
-    if tmpArr[2]==id.to_s
-      round_id=tmpArr[1]
+    tmp_arr = filter_text(match[0].split(','))
+    if tmp_arr[2]==id.to_s
+      round_id=tmp_arr[1]
       break
     end
   end
@@ -85,32 +127,21 @@ def show_courses_in_table(courses)
 end
 
 def parse_courses(raw_html)
-
-  course_entities = []
+  courses = []
   count=0
-  raw_html.scan /top\.createJxbObj\((.*?)\)/m do |match|
-    tmpArr = filter_text(match[0].split(','))
-    course_entities << CourseEntity.new do |entity|
+  transform_bracket(raw_html).scan /top\.createJxbObj\((.*?)\)/m do |match|
+    tmp_arr = filter_text(match[0].split(','))
+    courses << CourseEntity.new do |entity|
       entity.index= (count=count+1)
-      entity.id= tmpArr[1]
-      entity.name= tmpArr[4]
-      entity.credit= tmpArr[10]
-      entity.teacher= tmpArr[14]
-      entity.period= tmpArr[8]
-      entity.class_name= tmpArr[5]
+      entity.id= tmp_arr[1]
+      entity.name= tmp_arr[4]
+      entity.credit= tmp_arr[10]
+      entity.teacher= tmp_arr[14]
+      entity.period= tmp_arr[8]
+      entity.class_name= tmp_arr[5]
     end
   end
-  course_entities
-end
-
-
-def request_select_course(client, course_entity, xxlx, lcid)
-  msg = client.get 'http://bkxk.xmu.edu.cn/xsxk/elect.html',
-                   method: 'handleZxxk',
-                   jxbid: course_entity.id,
-                   xxlx: xxlx,
-                   xklc: lcid
-  JSON::parse msg.body
+  courses.select { |course| course.id.size>0 }
 end
 
 def create_attempt_thread(max_interval, client, course, xxlx, lcid, &block)
@@ -130,6 +161,15 @@ def create_attempt_thread(max_interval, client, course, xxlx, lcid, &block)
     end
     exit if block.binding.local_variable_get(:opened_thread_count)-1==0
   end
+end
+
+def request_select_course(client, course_entity, xxlx, lcid)
+  msg = client.get 'http://bkxk.xmu.edu.cn/xsxk/elect.html',
+                   method: 'handleZxxk',
+                   jxbid: course_entity.id,
+                   xxlx: xxlx,
+                   xklc: lcid
+  JSON::parse msg.body
 end
 
 def prepare_select_course(client)
@@ -167,68 +207,41 @@ def get_account_info
   [stu_id, passwd]
 rescue
   puts '账号信息受损，请重新设置：'
-  set_up_account && exit
-end
-
-def select_course_common(client, url, xxlx)
-  prepare_select_course(client)
-  courses = parse_courses((client.get url).body)
-  show_courses_in_table courses
-  try_to_select_courses(client, courses, xxlx, get_main_select_round(client))
-  loop do
-    sleep 3
-  end
-end
-
-def select_school_elective(client)
-  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/yxxx.html?pagination=5000', 4
-end
-
-def select_general_elective(client)
-  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/qxxxx.html?pagination=5000', 3
-end
-
-def select_public(client)
-  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/ggk.html?pagination=5000', 5
+  set_up_account
 end
 
 def ensure_local_account
-  unless (File.exists? TOKEN_FILE_NAME)
+  unless File.exists? TOKEN_FILE_NAME
     puts '请先设置账号信息（账号信息会先加密然后保存在本地，用于授权选课系统）'
     set_up_account && exit
   end
 end
 
-opts = Slop.parse do |o|
-  o.bool *%w{-h --help}, '显示帮助'
-  o.bool *%w{-c --clear}, '清除本地账户信息'
-  o.bool *%w{-r --reset}, '重置账户信息'
-
-  #院选课程 xxlx=4
-  o.bool *%w{-s --school}, '院选选课模式'
-  #校选课程 xxlx=3
-  o.bool *%w{-g --general}, '校选选课模式'
-  #公共课程 xxlx=5
-  o.bool *%w{-p --public}, '公共课选课模式'
-
-  o.bool *%w{-v --version}, '显示当前版本'
+#转换圆括号
+def transform_bracket(raw)
+  if Enumerable===raw
+    return [].tap do |arr|
+      raw.each do |item|
+        arr<<transform_bracket(item)
+      end
+    end
+  end
+  raw.gsub! /\((.*)\)/ do |match|
+    "（#{match[1..-2]}）"
+  end
+  raw
 end
-
-case true
-  when opts.version?
-    puts Arb::Xmu::Course::VERSION
-  when opts.help?
-    puts(opts) && exit
-  when opts.clear?
-    File.delete(TOKEN_FILE_NAME) && exit
-  when opts.reset?
-    set_up_account && exit
-  when opts.school?
-    select_school_elective(CLIENT)
-  when opts.general?
-    select_general_elective(CLIENT)
-  when opts.public?
-    select_public(CLIENT)
-  else
-    puts(opts) && exit
+def filter_text(raw)
+  if Enumerable===raw
+    return [].tap do |arr|
+      raw.each do |item|
+        arr<<filter_text(item)
+      end
+    end
+  end
+  black_list =([] << "\r" << "\n" << "\t" << "'" << '<br>')
+  black_list.each do |tmp|
+    raw.gsub! tmp, ''
+  end
+  raw
 end
