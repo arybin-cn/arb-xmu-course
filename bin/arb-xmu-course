@@ -122,10 +122,10 @@ def create_attempt_thread(max_interval, client, course, xxlx, lcid, &block)
       sleep interval
       res = request_select_course(client, course, xxlx, lcid)
       if res['success']
-        $stdout.puts '', "课程：《#{course.name}》已经成功选课！", ''
+        $stdout.puts '', "《#{course.name}》（#{course.class_name}班）已经成功选课！", ''
         break
       else
-        $stdout.puts '', "课程：《#{course.name}》第#{count}次尝试选课失败，#{interval}秒后将重试。（错误信息：#{filter_text(res['message'])}）", ''
+        $stdout.puts '', "《#{course.name}》（#{course.class_name}班）第#{count}次尝试选课失败，#{interval}秒后将重试。（#{filter_text(res['message'])}）", ''
       end
     end
     exit if block.binding.local_variable_get(:opened_thread_count)-1==0
