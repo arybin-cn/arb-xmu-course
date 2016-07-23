@@ -22,7 +22,7 @@ def filter_text(raw)
       end
     end
   end
-  black_list =([] << "\r" << "\n" << "\t" << "'")
+  black_list =([] << "\r" << "\n" << "\t" << "'" << '<br>')
   black_list.each do |tmp|
     raw.gsub! tmp, ''
   end
@@ -122,35 +122,40 @@ def create_attempt_thread(max_interval, client, course, xxlx, lcid, &block)
       sleep interval
       res = request_select_course(client, course, xxlx, lcid)
       if res['success']
-        $stdout.puts "课程：《#{course.name}》已经成功选课！"
+        $stdout.puts '', "课程：《#{course.name}》已经成功选课！", ''
         break
       else
-        $stdout.puts "课程：《#{course.name}》第#{count}次尝试选课失败，#{interval}秒后将重试。（错误信息：#{res['message']}）"
+        $stdout.puts '', "课程：《#{course.name}》第#{count}次尝试选课失败，#{interval}秒后将重试。（错误信息：#{filter_text(res['message'])}）", ''
       end
-      exit if block.binding.local_variable_get(:opened_thread_count)-1==0
     end
+    exit if block.binding.local_variable_get(:opened_thread_count)-1==0
   end
 end
 
 def prepare_select_course(client)
-  ensure_account
+  ensure_local_account
   username, password = get_account_info
   authorize_session(client, username, password)
 end
 
+def process_ids(str_ids)
+  #return int_ids
+  int_ids = str_ids.map do |item|
+    next item.to_i unless item=~/[^0-9]/
+    next (Range.new *(item.split('-').map(&:to_i))).to_a if item.include? '-'
+  end
+  int_ids.flatten.uniq
+end
+
 def try_to_select_courses(client, courses, xxlx, lcid)
-  $stdout.puts ''
-  $stdout.puts '输入要选的课程ID， 以空格分割：'
-
-  ids = $stdin.gets.chomp.split(' ')
-
-  $stdout.puts '输入最大重试间隔时间，要求不得低于2秒：'
-
+  $stdout.puts '', '输入要选的课程ID（重复无效，支持语法糖：x-y，会尝试选择ID从x到y的所有课程）， 以空格分割：'
+  ids = process_ids($stdin.gets.chomp.split(' '))
+  $stdout.puts '输入最大重试间隔时间，要求不得低于3秒：'
   max_interval = $stdin.gets.chomp.to_i
-  max_interval = 2 if max_interval<2
+  max_interval = 3 if max_interval<3
   opened_thread_count = ids.size
   ids.each do |id|
-    create_attempt_thread(max_interval, client, courses.find { |course| course.index==id.to_i }, xxlx, lcid) {}
+    create_attempt_thread(max_interval, client, courses.find { |course| course.index==id }, xxlx, lcid) {}
   end
 end
 
@@ -160,34 +165,37 @@ def get_account_info
     stu_id, passwd=SimpleDes.decrypt(file.read.split(TOKEN_SEPARATOR))
   end
   [stu_id, passwd]
+rescue
+  puts '账号信息受损，请重新设置：'
+  set_up_account && exit
 end
 
-
-def select_school_elective(client)
-
+def select_course_common(client, url, xxlx)
   prepare_select_course(client)
-  school_courses = parse_courses((client.get 'http://bkxk.xmu.edu.cn/xsxk/yxxx.html').body)
-  show_courses_in_table school_courses
-  try_to_select_courses(client, school_courses, 4, get_main_select_round(client))
-
+  courses = parse_courses((client.get url).body)
+  show_courses_in_table courses
+  try_to_select_courses(client, courses, xxlx, get_main_select_round(client))
   loop do
     sleep 3
   end
 end
 
-def select_general_elective
-
+def select_school_elective(client)
+  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/yxxx.html?pagination=5000', 4
 end
 
-def select_public
-
+def select_general_elective(client)
+  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/qxxxx.html?pagination=5000', 3
 end
 
-def ensure_account
+def select_public(client)
+  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/ggk.html?pagination=5000', 5
+end
+
+def ensure_local_account
   unless (File.exists? TOKEN_FILE_NAME)
-    puts '请先设置账户信息（账户信息会先加密然后保存在本地，用于授权选课系统）'
-    set_up_account
-    exit
+    puts '请先设置账号信息（账号信息会先加密然后保存在本地，用于授权选课系统）'
+    set_up_account && exit
   end
 end
 
@@ -218,9 +226,9 @@ case true
   when opts.school?
     select_school_elective(CLIENT)
   when opts.general?
-    # select_general_elective
+    select_general_elective(CLIENT)
   when opts.public?
-    # select_public
+    select_public(CLIENT)
   else
     puts(opts) && exit
 end
