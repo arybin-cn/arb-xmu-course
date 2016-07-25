@@ -9,44 +9,6 @@ require 'arb/xmu/course'
 include Arb::Util
 include Arb::Xmu::Course
 
-TOKEN_FILE_NAME = 'encrypted_token'
-TOKEN_SEPARATOR = ':'
-CLIENT = HTTPClient.new
-
-opts = Slop.parse do |o|
-  o.bool *%w{-h --help}, '显示帮助'
-  o.bool *%w{-c --clear}, '清除本地账户信息'
-  o.bool *%w{-r --reset}, '重置账户信息'
-
-  #院选课程 xxlx=4
-  o.bool *%w{-s --school}, '院选选课模式'
-  #校选课程 xxlx=3
-  o.bool *%w{-g --general}, '校选选课模式'
-  #公共课程 xxlx=5
-  o.bool *%w{-p --public}, '公共课选课模式'
-
-  o.bool *%w{-v --version}, '显示当前版本'
-end
-
-case true
-  when opts.version?
-    puts Arb::Xmu::Course::VERSION
-  when opts.help?
-    puts(opts) && exit
-  when opts.clear?
-    File.delete(TOKEN_FILE_NAME) && exit
-  when opts.reset?
-    set_up_account
-  when opts.school?
-    select_school_elective(CLIENT)
-  when opts.general?
-    select_general_elective(CLIENT)
-  when opts.public?
-    select_public(CLIENT)
-  else
-    puts(opts) && exit
-end
-
 def select_school_elective(client)
   select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/yxxx.html?pagination=5000', 4
 end
@@ -55,30 +17,42 @@ def select_general_elective(client)
   select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/qxxxx.html?pagination=5000', 3
 end
 
+def select_general_required(client)
+  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/qxxbxk.html?pagination=5000', 1
+end
+
 def select_public(client)
   select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/ggk.html?pagination=5000', 5
 end
+
+def select_school_required(client)
+  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/yxbxk.html?pagination=5000', 2
+end
+
+def select_across(client)
+  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/kxk.html?pagination=5000', 3
+end
+
 
 def select_course_common(client, url, xxlx)
   prepare_select_course(client)
   courses = parse_courses((client.get url).body)
   show_courses_in_table courses
   try_to_select_courses(client, courses, xxlx, get_main_select_round(client))
-  $stdout.puts '已经开始选课，输入字符q退出。'
   loop do
-    exit if 'q'==$stdin.gets.chomp
+    global_gets
   end
 end
 
 def set_up_account
-  $stdout.puts '请输入学号：'
-  stu_id= $stdin.gets.chomp
-  $stdout.puts '请输入密码：'
-  passwd= $stdin.gets.chomp
+  global_puts '请输入学号：'
+  stu_id= global_gets
+  global_puts '请输入密码：'
+  passwd= global_gets
   File.open TOKEN_FILE_NAME, 'w' do |file|
     file.write (SimpleDes.encrypt(stu_id)+TOKEN_SEPARATOR+SimpleDes.encrypt(passwd))
   end
-  $stdout.puts '账号信息已经加密并保存在当前目录，请妥善保管。'
+  global_puts '账号信息已经加密并保存在当前目录，请妥善保管。'
   exit
 end
 
@@ -86,8 +60,8 @@ def retrieve_check_code(client)
   File.open 'check_code.jpeg', 'wb' do |file|
     file.write(client.get('http://bkxk.xmu.edu.cn/xsxk/getCheckCode').body)
   end
-  $stdout.puts '验证码图片已在当前目录生成，请查看后输入：'
-  $stdin.gets.chomp
+  global_puts '验证码图片已在当前目录生成，请查看后输入：'
+  global_gets
 end
 
 def authorize_session(client, username, password)
@@ -123,7 +97,7 @@ def show_courses_in_table(courses)
       table.add_row course_entity.to_a
     end
   end
-  $stdout.puts table
+  global_puts table
 end
 
 def parse_courses(raw_html)
@@ -153,13 +127,15 @@ def create_attempt_thread(max_interval, client, course, xxlx, lcid, &block)
       sleep interval
       res = request_select_course(client, course, xxlx, lcid)
       if res['success']
-        $stdout.puts '', "《#{course.name}》（#{course.class_name}班）已经成功选课！", ''
+        global_puts '', "《#{course.name}》（#{course.class_name}班）已经成功选课！", ''
         break
       else
-        $stdout.puts '', "《#{course.name}》（#{course.class_name}班）第#{count}次尝试选课失败，#{interval}秒后将重试。（#{filter_text(res['message'])}）", ''
+        global_puts '', "《#{course.name}》（#{course.class_name}班）第#{count}次尝试选课失败，#{interval}秒后将重试。（#{filter_text(res['message'])}）", ''
       end
     end
-    exit if block.binding.local_variable_get(:opened_thread_count)-1==0
+    opened_thread_count=block.binding.local_variable_get(:opened_thread_count)
+    exit unless opened_thread_count > 0
+    block.binding.local_variable_set :opened_thread_count, opened_thread_count-1
   end
 end
 
@@ -188,10 +164,10 @@ def process_ids(str_ids)
 end
 
 def try_to_select_courses(client, courses, xxlx, lcid)
-  $stdout.puts '', '输入要选的课程ID（重复无效，支持语法糖：x-y，会尝试选择ID从x到y的所有课程）， 以空格分割：'
-  ids = process_ids($stdin.gets.chomp.split(' '))
-  $stdout.puts '输入最大重试间隔时间，要求不得低于3秒：'
-  max_interval = $stdin.gets.chomp.to_i
+  global_puts '', '输入要选的课程ID（重复无效，支持语法糖：x-y，会尝试选择ID从x到y的所有课程）， 以空格分割：'
+  ids = process_ids(global_gets.split(' '))
+  global_puts '输入最大重试间隔时间，要求不得低于3秒：'
+  max_interval = global_gets.to_i
   max_interval = 3 if max_interval<3
   opened_thread_count = ids.size
   ids.each do |id|
@@ -206,13 +182,13 @@ def get_account_info
   end
   [stu_id, passwd]
 rescue
-  puts '账号信息受损，请重新设置：'
+  global_puts '账号信息受损，请重新设置：'
   set_up_account
 end
 
 def ensure_local_account
   unless File.exists? TOKEN_FILE_NAME
-    puts '请先设置账号信息（账号信息会先加密然后保存在本地，用于授权选课系统）'
+    global_puts '请先设置账号信息（账号信息会先加密然后保存在本地，用于授权选课系统）'
     set_up_account && exit
   end
 end
@@ -231,6 +207,7 @@ def transform_bracket(raw)
   end
   raw
 end
+
 def filter_text(raw)
   if Enumerable===raw
     return [].tap do |arr|
@@ -244,4 +221,79 @@ def filter_text(raw)
     raw.gsub! tmp, ''
   end
   raw
+end
+
+def global_puts(*args)
+  $stdout.puts *args
+end
+
+def global_gets(*args)
+  quit_flags=%w{q quit e exit}
+  tmp = $stdin.gets.chomp
+  exit if quit_flags.include? tmp
+  tmp
+end
+
+
+TOKEN_FILE_NAME = 'encrypted_token'
+TOKEN_SEPARATOR = ':'
+CLIENT = HTTPClient.new
+
+begin
+  opts = Slop.parse do |o|
+    o.banner="为缓解选课服务器压力，请酌情选择较大的“最大重试间隔”，此外，在任何需要输入的地方输入“q”或“quit”可以结束本程序。\n
+用法：命令行输入arb-xmu-course[空格][选项]，选项在以下列出。   -Powered By AryBin"
+
+    o.bool *%w{-h --help}, '显示帮助'
+    o.bool *%w{-c --clear}, '清除本地账户信息'
+    o.bool *%w{-r --reset}, '重置账户信息'
+
+    #院选课程 xxlx=4
+    o.bool *%w{-s --school}, '院选选课模式'
+    #院必修课程 xxlx=2
+    o.bool *%w{-S --School}, '院必修选课模式'
+    #校选课程 xxlx=3
+    o.bool *%w{-g --general}, '校选选课模式'
+    #校必修课程 xxlx=1
+    o.bool *%w{-G --General}, '校必修选课模式'
+    #公共课程 xxlx=5
+    o.bool *%w{-p --public}, '公共课选课模式'
+    #跨选课程
+    o.bool *%w{-a --across}, '跨选课选课模式'
+
+    o.bool *%w{-v --version}, '显示当前版本'
+  end
+rescue Slop::MissingArgument
+  global_puts '参数不足，请确认。'
+rescue Slop::UnknownOption
+  global_puts '未知选项，请确认。'
+end
+
+#error
+exit unless opts
+
+case true
+  when opts.version?
+    global_puts Arb::Xmu::Course::VERSION
+  when opts.help?
+    global_puts(opts)
+  when opts.clear?
+    File.delete(TOKEN_FILE_NAME)
+    exit
+  when opts.reset?
+    set_up_account
+  when opts.school?
+    select_school_elective(CLIENT)
+  when opts.general?
+    select_general_elective(CLIENT)
+  when opts.public?
+    select_public(CLIENT)
+  when opts.General?
+    select_general_required(CLIENT)
+  when opts.School?
+    select_school_required(CLIENT)
+  when opts.across?
+    select_across(CLIENT)
+  else
+    puts opts
 end
