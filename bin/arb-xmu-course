@@ -124,14 +124,14 @@ def create_attempt_thread(max_interval, client, course, xxlx, lcid, &block)
     loop do
       count+=1
       interval= 1+rand(max_interval)
-      sleep interval
       res = request_select_course(client, course, xxlx, lcid)
       if res['success']
-        global_puts '', "《#{course.name}》（#{course.class_name}班）已经成功选课！", ''
+        global_puts "《#{course.name}》（#{course.class_name}班）已经成功选课！" 
         break
       else
-        global_puts '', "《#{course.name}》（#{course.class_name}班）第#{count}次尝试选课失败，#{interval}秒后将重试。（#{filter_text(res['message'])}）", ''
+        global_puts  "《#{course.name}》（#{course.class_name}班）第#{count}次尝试选课失败，#{interval}秒后将重试。（#{filter_text(res['message'])}）"
       end
+      sleep interval
     end
     opened_thread_count=block.binding.local_variable_get(:opened_thread_count)
     exit unless opened_thread_count > 0
@@ -141,10 +141,10 @@ end
 
 def request_select_course(client, course_entity, xxlx, lcid)
   msg = client.get 'http://bkxk.xmu.edu.cn/xsxk/elect.html',
-                   method: 'handleZxxk',
-                   jxbid: course_entity.id,
-                   xxlx: xxlx,
-                   xklc: lcid
+    method: 'handleZxxk',
+    jxbid: course_entity.id,
+    xxlx: xxlx,
+    xklc: lcid
   JSON::parse msg.body
 end
 
@@ -164,7 +164,7 @@ def process_ids(str_ids)
 end
 
 def try_to_select_courses(client, courses, xxlx, lcid)
-  global_puts '', '输入要选的课程ID（重复无效，支持语法糖：x-y，会尝试选择ID从x到y的所有课程）， 以空格分割：'
+  global_puts '输入要选的课程ID（重复无效，支持语法糖：x-y，会尝试选择ID从x到y的所有课程）， 以空格分割：'
   ids = process_ids(global_gets.split(' '))
   global_puts '输入最大重试间隔时间，要求不得低于3秒：'
   max_interval = global_gets.to_i
@@ -224,7 +224,11 @@ def filter_text(raw)
 end
 
 def global_puts(*args)
-  $stdout.puts *args
+  fileout=File.open($logfile,'a') if $logfile
+  [fileout,$stdout].compact.each do |stream|
+    stream.puts '',Time.now,*args
+  end
+  fileout.close rescue nil
 end
 
 def global_gets(*args)
@@ -241,12 +245,12 @@ CLIENT = HTTPClient.new
 
 begin
   opts = Slop.parse do |o|
-    o.banner="为缓解选课服务器压力，请酌情选择较大的“最大重试间隔”，此外，在任何需要输入的地方输入“q”或“quit”可以结束本程序。\n
-用法：命令行输入arb-xmu-course[空格][选项]，选项在以下列出。   -Powered By AryBin"
+    o.banner="为缓解选课服务器压力，请酌情选择较大的“最大重试间隔”，此外，在任何需要输入的地方输入“q”或“quit”可以结束本程序。       -Powered By AryBin"
 
     o.bool *%w{-h --help}, '显示帮助'
     o.bool *%w{-c --clear}, '清除本地账户信息'
     o.bool *%w{-r --reset}, '重置账户信息'
+    o.string *%w{-l --log},'记录到指定的日志文件'
 
     #院选课程 xxlx=4
     o.bool *%w{-s --school}, '院选选课模式'
@@ -271,29 +275,29 @@ end
 
 #error
 exit unless opts
+$logfile = opts[:log]
 
 case true
-  when opts.version?
-    global_puts Arb::Xmu::Course::VERSION
-  when opts.help?
-    global_puts(opts)
-  when opts.clear?
-    File.delete(TOKEN_FILE_NAME)
-    exit
-  when opts.reset?
-    set_up_account
-  when opts.school?
-    select_school_elective(CLIENT)
-  when opts.general?
-    select_general_elective(CLIENT)
-  when opts.public?
-    select_public(CLIENT)
-  when opts.General?
-    select_general_required(CLIENT)
-  when opts.School?
-    select_school_required(CLIENT)
-  when opts.across?
-    select_across(CLIENT)
-  else
-    puts opts
+when opts.clear?
+  File.delete(TOKEN_FILE_NAME)
+when opts.reset?
+  set_up_account
+when opts.school?
+  select_school_elective(CLIENT)
+when opts.general?
+  select_general_elective(CLIENT)
+when opts.public?
+  select_public(CLIENT)
+when opts.General?
+  select_general_required(CLIENT)
+when opts.School?
+  select_school_required(CLIENT)
+when opts.across?
+  select_across(CLIENT)
+when opts.version?
+  puts Arb::Xmu::Course::VERSION
+when opts.help?
+  puts(opts)
+else
+  puts opts
 end
