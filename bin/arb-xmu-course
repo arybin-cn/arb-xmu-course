@@ -144,8 +144,9 @@ def create_attempt_thread(max_interval, client, course, xxlx, lcid, retry_count,
       opened_thread_count=block.binding.local_variable_get(:opened_thread_count)
       exit unless opened_thread_count > 0
       block.binding.local_variable_set :opened_thread_count, opened_thread_count-1
-    rescue
-      exit_with_error('未知原因导致程序运行出错，请联系作者。')
+    rescue Interrupt
+    rescue Exception=>e
+      exit_with_error("未知原因导致程序运行出错，请联系作者。（#{e}）")
     end
   end
 end
@@ -268,7 +269,7 @@ begin
     o.bool *%w{-c --clear}, '清除本地账户信息'
     o.bool *%w{-r --reset}, '重置账户信息'
     o.string *%w{-l --log},'记录到指定的日志文件'
-    o.integer *%w{-R --retry-count},'超时重连次数，默认无限次'
+    o.integer *%w{-R --retry-count},'超时重连次数，默认无限次',default: -1
 
     #院选课程 xxlx=4
     o.bool *%w{-s --school}, '院选选课模式'
@@ -295,7 +296,8 @@ end
 #error
 exit unless opts
 $arb_logfile = opts[:log]
-$arb_retry_count = opts[:'retry-count'] or -1
+$arb_retry_count = opts[:'retry-count']
+
 global_puts '参数解析完毕，连接服务器……'
 
 
