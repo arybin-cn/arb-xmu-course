@@ -42,6 +42,8 @@ def select_course_common(client, url, xxlx)
   loop do
     global_gets
   end
+rescue Timeout::Error, HTTPClient::TimeoutError
+  exit_with_error "服务器无响应，程序结束运行。"
 end
 
 def set_up_account
@@ -118,24 +120,33 @@ def parse_courses(raw_html)
   courses.select { |course| course.id.size>0 }
 end
 
-def create_attempt_thread(max_interval, client, course, xxlx, lcid, &block)
+def create_attempt_thread(max_interval, client, course, xxlx, lcid, retry_count, &block)
   Thread.new do
-    count=0
-    loop do
-      count+=1
-      interval= 1+rand(max_interval)
-      res = request_select_course(client, course, xxlx, lcid)
-      if res['success']
-        global_puts "《#{course.name}》（#{course.class_name}班）已经成功选课！" 
-        break
-      else
-        global_puts  "《#{course.name}》（#{course.class_name}班）第#{count}次尝试选课失败，#{interval}秒后将重试。（#{filter_text(res['message'])}）"
+    begin
+      count=0
+      loop do
+        count+=1
+        interval= 1+rand(max_interval)
+        begin
+          res = request_select_course(client, course, xxlx, lcid)
+          if res['success']
+            global_puts "《#{course.name}》（#{course.class_name}班）已经成功选课！" 
+            break
+          else
+            global_puts  "《#{course.name}》（#{course.class_name}班）第#{count}次尝试选课失败，#{interval}秒后将重试。（#{filter_text(res['message'])}）"
+          end
+          sleep interval
+        rescue Timeout::Error, HTTPClient::TimeoutError
+          retry if retry_count!=0 and retry_count-=1 and global_puts('网络超时，重新连接中……')
+          exit_with_error('超时次数耗尽，程序结束运行。') if retry_count==0
+        end
       end
-      sleep interval
+      opened_thread_count=block.binding.local_variable_get(:opened_thread_count)
+      exit unless opened_thread_count > 0
+      block.binding.local_variable_set :opened_thread_count, opened_thread_count-1
+    rescue
+      exit_with_error('未知原因导致程序运行出错，请联系作者。')
     end
-    opened_thread_count=block.binding.local_variable_get(:opened_thread_count)
-    exit unless opened_thread_count > 0
-    block.binding.local_variable_set :opened_thread_count, opened_thread_count-1
   end
 end
 
@@ -171,7 +182,7 @@ def try_to_select_courses(client, courses, xxlx, lcid)
   max_interval = 3 if max_interval<3
   opened_thread_count = ids.size
   ids.each do |id|
-    create_attempt_thread(max_interval, client, courses.find { |course| course.index==id }, xxlx, lcid) {}
+    create_attempt_thread(max_interval, client, courses.find { |course| course.index==id }, xxlx, lcid, $arb_retry_count) {}
   end
 end
 
@@ -224,11 +235,12 @@ def filter_text(raw)
 end
 
 def global_puts(*args)
-  fileout=File.open($logfile,'a') if $logfile
+  fileout=File.open($arb_logfile,'a') if $arb_logfile
   [fileout,$stdout].compact.each do |stream|
-    stream.puts '',Time.now,*args
+    stream.puts Time.now,*args,''
   end
-  fileout.close rescue nil
+  fileout.close rescue true
+  true
 end
 
 def global_gets(*args)
@@ -238,19 +250,25 @@ def global_gets(*args)
   tmp
 end
 
+def exit_with_error(*args)
+  global_puts(*args) and exit
+end
+
 
 TOKEN_FILE_NAME = 'encrypted_token'
 TOKEN_SEPARATOR = ':'
 CLIENT = HTTPClient.new
+CLIENT.tap{|client| client.methods.grep(/timeout=$/).each{|method| client.send(method,20)}}
 
 begin
   opts = Slop.parse do |o|
-    o.banner="为缓解选课服务器压力，请酌情选择较大的“最大重试间隔”，此外，在任何需要输入的地方输入“q”或“quit”可以结束本程序。       -Powered By AryBin"
+    o.banner="为缓解选课服务器压力，请酌情选择较大的“最大重试间隔”。在任何需要输入的地方输入“q”或“quit”可以结束本程序。 --Powered By AryBin"
 
     o.bool *%w{-h --help}, '显示帮助'
     o.bool *%w{-c --clear}, '清除本地账户信息'
     o.bool *%w{-r --reset}, '重置账户信息'
     o.string *%w{-l --log},'记录到指定的日志文件'
+    o.integer *%w{-R --retry-count},'超时重连次数，默认无限次'
 
     #院选课程 xxlx=4
     o.bool *%w{-s --school}, '院选选课模式'
@@ -268,14 +286,18 @@ begin
     o.bool *%w{-v --version}, '显示当前版本'
   end
 rescue Slop::MissingArgument
-  global_puts '参数不足，请确认。'
+  exit_with_error '参数不足，请确认。'
 rescue Slop::UnknownOption
-  global_puts '未知选项，请确认。'
+  exit_with_error '未知选项，请确认。'
+rescue
 end
 
 #error
 exit unless opts
-$logfile = opts[:log]
+$arb_logfile = opts[:log]
+$arb_retry_count = opts[:'retry-count'] or -1
+global_puts '参数解析完毕，连接服务器……'
+
 
 case true
 when opts.clear?
