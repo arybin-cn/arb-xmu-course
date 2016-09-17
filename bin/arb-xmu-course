@@ -45,7 +45,7 @@ def select_course_common(client, url, xxlx)
 rescue Timeout::Error, HTTPClient::TimeoutError
   exit_with_error "服务器无响应，程序结束运行。"
 rescue Exception => e
-  exit_with_error "因未知错误，程序结束运行。(#{e})"
+  exit_with_error "程序结束运行。(#{e})"
 end
 
 def set_up_account
@@ -124,7 +124,6 @@ end
 
 def create_attempt_thread(max_interval, client, course, xxlx, lcid, retry_count, &block)
   Thread.new do
-    begin
       count=0
       loop do
         count+=1
@@ -138,17 +137,14 @@ def create_attempt_thread(max_interval, client, course, xxlx, lcid, retry_count,
             global_puts  "《#{course.name}》（#{course.class_name}班）第#{count}次尝试选课失败，#{interval}秒后将重试。（#{filter_text(res['message'])}）"
           end
           sleep interval
-        rescue 
-          retry if retry_count!=0 and retry_count-=1 and global_puts('网络超时，重新连接中……')
+        rescue Exception=>e
+          retry if retry_count!=0 and retry_count-=1 and global_puts("网络超时，重新连接中……（#{e}）")
           exit_with_error('超时次数耗尽，程序结束运行。') if retry_count==0
         end
       end
       opened_thread_count=block.binding.local_variable_get(:opened_thread_count)
       exit unless opened_thread_count > 0
       block.binding.local_variable_set :opened_thread_count, opened_thread_count-1
-    rescue Exception=>e
-      exit_with_error "因未知错误，程序结束运行。(#{e})"
-    end
   end
 end
 
@@ -250,8 +246,6 @@ def global_gets(*args)
   tmp = $stdin.gets.chomp
   exit if quit_flags.include? tmp
   tmp
-rescue Interrupt
-  exit_with_error "因手动退出，程序结束运行。"
 end
 
 def exit_with_error(*args)
