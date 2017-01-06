@@ -29,9 +29,10 @@ def select_school_required(client)
   select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/yxbxk.html?pagination=5000', 2
 end
 
-def select_across(client)
-  select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/kxk.html?pagination=5000', 3
-end
+#bugs here: should change 'handleZxxk' to 'handleKxxk' at line 154
+#def select_across(client)
+#select_course_common client, 'http://bkxk.xmu.edu.cn/xsxk/kxk.html?pagination=5000', 3
+#end
 
 
 def select_course_common(client, url, xxlx)
@@ -278,7 +279,7 @@ begin
     #公共课程 xxlx=5
     o.bool *%w{-p --public}, '公共课选课模式'
     #跨选课程
-    o.bool *%w{-a --across}, '跨选课选课模式'
+    #o.bool *%w{-a --across}, '跨选课选课模式'
 
     o.bool *%w{-v --version}, '显示当前版本'
   end
